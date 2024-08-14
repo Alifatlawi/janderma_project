@@ -11,127 +11,91 @@ import Vision
 
 class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDelegate {
     
-    // Main view for showing camera content.
     @IBOutlet weak var previewView: UIView?
-    
-    // AVCapture variables to hold sequence data
-    var session: AVCaptureSession?
-    var previewLayer: AVCaptureVideoPreviewLayer?
-    
-    var videoDataOutput: AVCaptureVideoDataOutput?
-    var videoDataOutputQueue: DispatchQueue?
-    
-    var captureDevice: AVCaptureDevice?
-    var captureDeviceResolution: CGSize = CGSize()
-    
-    // Layer UI for drawing Vision results
-    var rootLayer: CALayer?
-    var detectionOverlayLayer: CALayer?
-    var detectedFaceRectangleShapeLayer: CAShapeLayer?
-    var detectedFaceLandmarksShapeLayer: CAShapeLayer?
-    
-    // Vision requests
-    private var detectionRequests: [VNDetectFaceRectanglesRequest]?
-    private var trackingRequests: [VNTrackObjectRequest]?
-    
-    lazy var sequenceRequestHandler = VNSequenceRequestHandler()
-    
-    // MARK: UIViewController overrides
-    
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        
-        self.session = self.setupAVCaptureSession()
-        
-        self.prepareVisionRequest()
-        
-        self.session?.startRunning()
-        
-        let switchCameraButton = UIButton(type: .system)
-            switchCameraButton.setTitle("Switch Camera", for: .normal)
-            switchCameraButton.backgroundColor = .white
-            switchCameraButton.tintColor = .black
-            switchCameraButton.addTarget(self, action: #selector(switchCamera), for: .touchUpInside)
-            
-            switchCameraButton.translatesAutoresizingMaskIntoConstraints = false
-            view.addSubview(switchCameraButton)
-            
-            NSLayoutConstraint.activate([
-                switchCameraButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -50),
-                switchCameraButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-                switchCameraButton.widthAnchor.constraint(equalToConstant: 120),
-                switchCameraButton.heightAnchor.constraint(equalToConstant: 50)
-            ])
-            
-            self.session = self.setupAVCaptureSession()
-            self.prepareVisionRequest()
-            self.session?.startRunning()
-    }
-    
-    override func didReceiveMemoryWarning() {
-        super.didReceiveMemoryWarning()
-    }
-    
-    // Ensure that the interface stays locked in Portrait.
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        return .portrait
-    }
-    
-    // Ensure that the interface stays locked in Portrait.
-    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
-        return .portrait
-    }
-    
-    @objc func switchCamera() {
-        guard let session = session else { return }
-        
-        // Start a session configuration change.
-        session.beginConfiguration()
-        
-        // Remove existing input
-        if let currentInput = session.inputs.first as? AVCaptureDeviceInput {
-            session.removeInput(currentInput)
-            
-            // Get the new camera
-            let newCamera = ((currentInput.device.position == .back) ? getCamera(.front) : getCamera(.back))!
-            
-            // Add new input
-            if let newInput = try? AVCaptureDeviceInput(device: newCamera), session.canAddInput(newInput) {
-                session.addInput(newInput)
-            }
-        }
-        
-        // Commit the session configuration change.
-        session.commitConfiguration()
-    }
+      
+      var session: AVCaptureSession?
+      var previewLayer: AVCaptureVideoPreviewLayer?
+      
+      var videoDataOutput: AVCaptureVideoDataOutput?
+      var videoDataOutputQueue: DispatchQueue?
+      
+      var captureDevice: AVCaptureDevice?
+      var captureDeviceResolution: CGSize = CGSize()
+      
+      var rootLayer: CALayer?
+      var detectionOverlayLayer: CALayer?
+      var detectedFaceRectangleShapeLayer: CAShapeLayer?
+      var detectedFaceLandmarksShapeLayer: CAShapeLayer?
+      
+      private var detectionRequests: [VNDetectFaceRectanglesRequest]?
+      private var trackingRequests: [VNTrackObjectRequest]?
+      
+      lazy var sequenceRequestHandler = VNSequenceRequestHandler()
+      
+      override func viewDidLoad() {
+          super.viewDidLoad()
+          
+          let switchCameraButton = UIButton(type: .system)
+          switchCameraButton.setTitle("Switch Camera", for: .normal)
+          switchCameraButton.backgroundColor = .white
+          switchCameraButton.tintColor = .black
+          switchCameraButton.addTarget(self, action: #selector(switchCamera), for: .touchUpInside)
+          
+          switchCameraButton.translatesAutoresizingMaskIntoConstraints = false
+          view.addSubview(switchCameraButton)
+          
+          NSLayoutConstraint.activate([
+              switchCameraButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -50),
+              switchCameraButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+              switchCameraButton.widthAnchor.constraint(equalToConstant: 120),
+              switchCameraButton.heightAnchor.constraint(equalToConstant: 50)
+          ])
+          
+          self.session = self.setupAVCaptureSession()
+          self.prepareVisionRequest()
+          self.session?.startRunning()
+      }
+      
+      @objc func switchCamera() {
+          guard let session = session else { return }
+          
+          session.beginConfiguration()
+          
+          if let currentInput = session.inputs.first as? AVCaptureDeviceInput {
+              session.removeInput(currentInput)
+              
+              let newCamera = ((currentInput.device.position == .back) ? getCamera(.front) : getCamera(.back))!
+              
+              if let newInput = try? AVCaptureDeviceInput(device: newCamera), session.canAddInput(newInput) {
+                  session.addInput(newInput)
+              }
+          }
+          
+          session.commitConfiguration()
+      }
 
-    func getCamera(_ position: AVCaptureDevice.Position) -> AVCaptureDevice? {
-        let deviceDiscoverySession = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera], mediaType: .video, position: position)
-        
-        return deviceDiscoverySession.devices.first
-    }
+      func getCamera(_ position: AVCaptureDevice.Position) -> AVCaptureDevice? {
+          let deviceDiscoverySession = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera], mediaType: .video, position: position)
+          return deviceDiscoverySession.devices.first
+      }
 
-    
-    // MARK: AVCapture Setup
-    
-    /// - Tag: CreateCaptureSession
-    fileprivate func setupAVCaptureSession() -> AVCaptureSession? {
-        let captureSession = AVCaptureSession()
-        do {
-            let inputDevice = try self.configureCamera(for: captureSession, position: .front)
-            self.configureVideoDataOutput(for: inputDevice.device, resolution: inputDevice.resolution, captureSession: captureSession)
-            self.designatePreviewLayer(for: captureSession)
-            return captureSession
-        } catch let executionError as NSError {
-            self.presentError(executionError)
-        } catch {
-            self.presentErrorAlert(message: "An unexpected failure has occurred")
-        }
-        
-        self.teardownAVCapture()
-        
-        return nil
-    }
+      fileprivate func setupAVCaptureSession() -> AVCaptureSession? {
+          let captureSession = AVCaptureSession()
+          do {
+              let inputDevice = try self.configureCamera(for: captureSession, position: .front)
+              self.configureVideoDataOutput(for: inputDevice.device, resolution: inputDevice.resolution, captureSession: captureSession)
+              self.designatePreviewLayer(for: captureSession)
+              return captureSession
+          } catch let executionError as NSError {
+              self.presentError(executionError)
+          } catch {
+              self.presentErrorAlert(message: "An unexpected failure has occurred")
+          }
+          
+          self.teardownAVCapture()
+          
+          return nil
+      }
     
     fileprivate func configureCamera(for captureSession: AVCaptureSession, position: AVCaptureDevice.Position) throws -> (device: AVCaptureDevice, resolution: CGSize) {
         guard let device = getCamera(position) else {
@@ -397,9 +361,8 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
     
     fileprivate func updateLayerGeometry() {
         guard let overlayLayer = self.detectionOverlayLayer,
-            let rootLayer = self.rootLayer,
-            let previewLayer = self.previewLayer
-            else {
+              let rootLayer = self.rootLayer,
+              let previewLayer = self.previewLayer else {
             return
         }
         
@@ -407,42 +370,59 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
         
         let videoPreviewRect = previewLayer.layerRectConverted(fromMetadataOutputRect: CGRect(x: 0, y: 0, width: 1, height: 1))
         
-        var rotation: CGFloat
+        var rotation: CGFloat = 0
         var scaleX: CGFloat
         var scaleY: CGFloat
         
-        // Rotate the layer into screen orientation.
-        switch UIDevice.current.orientation {
-        case .portraitUpsideDown:
-            rotation = 180
-            scaleX = videoPreviewRect.width / captureDeviceResolution.width
-            scaleY = videoPreviewRect.height / captureDeviceResolution.height
-            
-        case .landscapeLeft:
-            rotation = 90
-            scaleX = videoPreviewRect.height / captureDeviceResolution.width
-            scaleY = scaleX
-            
-        case .landscapeRight:
-            rotation = -90
-            scaleX = videoPreviewRect.height / captureDeviceResolution.width
-            scaleY = scaleX
-            
-        default:
-            rotation = 0
-            scaleX = videoPreviewRect.width / captureDeviceResolution.width
-            scaleY = videoPreviewRect.height / captureDeviceResolution.height
+        if let input = session?.inputs.first as? AVCaptureDeviceInput {
+            if input.device.position == .front {
+                // Front camera logic (working well)
+                switch UIDevice.current.orientation {
+                case .portraitUpsideDown:
+                    rotation = 180
+                    scaleX = videoPreviewRect.width / captureDeviceResolution.width
+                    scaleY = videoPreviewRect.height / captureDeviceResolution.height
+                    
+                case .landscapeLeft:
+                    rotation = 90
+                    scaleX = videoPreviewRect.height / captureDeviceResolution.width
+                    scaleY = scaleX
+                    
+                case .landscapeRight:
+                    rotation = -90
+                    scaleX = videoPreviewRect.height / captureDeviceResolution.width
+                    scaleY = scaleX
+                    
+                default:
+                    rotation = 0
+                    scaleX = videoPreviewRect.width / captureDeviceResolution.width
+                    scaleY = videoPreviewRect.height / captureDeviceResolution.height
+                }
+                
+                let affineTransform = CGAffineTransform(rotationAngle: radiansForDegrees(rotation))
+                    .scaledBy(x: scaleX, y: -scaleY)
+                overlayLayer.setAffineTransform(affineTransform)
+                
+            } else if input.device.position == .back {
+                // Simplified back camera logic without rotation
+                scaleX = videoPreviewRect.width / captureDeviceResolution.width
+                scaleY = videoPreviewRect.height / captureDeviceResolution.height
+                
+                // Apply scaling with flipped x-axis and y-axis for back camera to correct the upside-down issue
+                let affineTransform = CGAffineTransform(scaleX: -scaleX, y: -scaleY)  // Flip x and y axes for back camera
+                overlayLayer.setAffineTransform(affineTransform)
+            }
         }
         
-        // Scale and mirror the image to ensure upright presentation.
-        let affineTransform = CGAffineTransform(rotationAngle: radiansForDegrees(rotation))
-            .scaledBy(x: scaleX, y: -scaleY)
-        overlayLayer.setAffineTransform(affineTransform)
-        
-        // Cover entire screen UI.
+        // Position the overlay layer correctly
         let rootLayerBounds = rootLayer.bounds
         overlayLayer.position = CGPoint(x: rootLayerBounds.midX, y: rootLayerBounds.midY)
     }
+
+
+
+
+
     
     fileprivate func addPoints(in landmarkRegion: VNFaceLandmarkRegion2D, to path: CGMutablePath, applying affineTransform: CGAffineTransform, closingWhenComplete closePath: Bool) {
         let pointCount = landmarkRegion.pointCount
