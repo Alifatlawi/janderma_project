@@ -46,6 +46,26 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
         self.prepareVisionRequest()
         
         self.session?.startRunning()
+        
+        let switchCameraButton = UIButton(type: .system)
+            switchCameraButton.setTitle("Switch Camera", for: .normal)
+            switchCameraButton.backgroundColor = .white
+            switchCameraButton.tintColor = .black
+            switchCameraButton.addTarget(self, action: #selector(switchCamera), for: .touchUpInside)
+            
+            switchCameraButton.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(switchCameraButton)
+            
+            NSLayoutConstraint.activate([
+                switchCameraButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -50),
+                switchCameraButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                switchCameraButton.widthAnchor.constraint(equalToConstant: 120),
+                switchCameraButton.heightAnchor.constraint(equalToConstant: 50)
+            ])
+            
+            self.session = self.setupAVCaptureSession()
+            self.prepareVisionRequest()
+            self.session?.startRunning()
     }
     
     override func didReceiveMemoryWarning() {
@@ -62,25 +82,76 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
         return .portrait
     }
     
+    @objc func switchCamera() {
+        guard let session = session else { return }
+        
+        // Start a session configuration change.
+        session.beginConfiguration()
+        
+        // Remove existing input
+        if let currentInput = session.inputs.first as? AVCaptureDeviceInput {
+            session.removeInput(currentInput)
+            
+            // Get the new camera
+            let newCamera = ((currentInput.device.position == .back) ? getCamera(.front) : getCamera(.back))!
+            
+            // Add new input
+            if let newInput = try? AVCaptureDeviceInput(device: newCamera), session.canAddInput(newInput) {
+                session.addInput(newInput)
+            }
+        }
+        
+        // Commit the session configuration change.
+        session.commitConfiguration()
+    }
+
+    func getCamera(_ position: AVCaptureDevice.Position) -> AVCaptureDevice? {
+        let deviceDiscoverySession = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera], mediaType: .video, position: position)
+        
+        return deviceDiscoverySession.devices.first
+    }
+
+    
     // MARK: AVCapture Setup
     
     /// - Tag: CreateCaptureSession
     fileprivate func setupAVCaptureSession() -> AVCaptureSession? {
         let captureSession = AVCaptureSession()
         do {
-            let inputDevice = try self.configureFrontCamera(for: captureSession)
+            let inputDevice = try self.configureCamera(for: captureSession, position: .front)
             self.configureVideoDataOutput(for: inputDevice.device, resolution: inputDevice.resolution, captureSession: captureSession)
             self.designatePreviewLayer(for: captureSession)
             return captureSession
         } catch let executionError as NSError {
             self.presentError(executionError)
         } catch {
-            self.presentErrorAlert(message: "An unexpected failure has occured")
+            self.presentErrorAlert(message: "An unexpected failure has occurred")
         }
         
         self.teardownAVCapture()
         
         return nil
+    }
+    
+    fileprivate func configureCamera(for captureSession: AVCaptureSession, position: AVCaptureDevice.Position) throws -> (device: AVCaptureDevice, resolution: CGSize) {
+        guard let device = getCamera(position) else {
+            throw NSError(domain: "ViewController", code: 1, userInfo: nil)
+        }
+        
+        let deviceInput = try AVCaptureDeviceInput(device: device)
+        if captureSession.canAddInput(deviceInput) {
+            captureSession.addInput(deviceInput)
+        }
+        
+        if let highestResolution = self.highestResolution420Format(for: device) {
+            try device.lockForConfiguration()
+            device.activeFormat = highestResolution.format
+            device.unlockForConfiguration()
+            
+            return (device, highestResolution.resolution)
+        }
+        
+        throw NSError(domain: "ViewController", code: 1, userInfo: nil)
     }
     
     /// - Tag: ConfigureDeviceResolution
@@ -243,7 +314,7 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
             }
             
             guard let faceDetectionRequest = request as? VNDetectFaceRectanglesRequest,
-                let results = faceDetectionRequest.results as? [VNFaceObservation] else {
+                  let results = faceDetectionRequest.results else {
                     return
             }
             DispatchQueue.main.async {
@@ -537,7 +608,7 @@ class ViewController: UIViewController, AVCaptureVideoDataOutputSampleBufferDele
                 }
                 
                 guard let landmarksRequest = request as? VNDetectFaceLandmarksRequest,
-                    let results = landmarksRequest.results as? [VNFaceObservation] else {
+                      let results = landmarksRequest.results else {
                         return
                 }
                 
